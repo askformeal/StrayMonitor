@@ -2,7 +2,7 @@ from threading import Thread
 from time import sleep
 from tkinter import messagebox
 from sys import argv
-
+# kuchisake ornament
 from src import __version__
 from src.settings import Settings
 
@@ -22,7 +22,6 @@ class Main:
                    rotation=self.settings.LOG_MAX_BYTES,
                    colorize=False,
                    )
-        print()
         # self.window = Window(self)
         if len(argv) > 1:
             monitor = argv[1].lower()
@@ -43,7 +42,6 @@ class Main:
             self.mem_icon = Icon('0%', self.gen_img(0), menu=menu)
             Thread(target=self.mem_icon.run, daemon=True).start()
 
-        self.cpu_icon.notify('hi', 'yes')
         logger.debug(f'Main module ({__name__}) initialized')
 
     def show_cpu(self):
