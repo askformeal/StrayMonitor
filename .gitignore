@@ -1,0 +1,15 @@
+/tmp
+/.venv
+*.log
+*.log.*
+__pycache__
+.python-version
+pyproject.toml
+uv.lock
+*.tmp.*
+build.py
+*.spec
+StrayMonitor_v*.zip
+/pystand
+/build
+/dist
