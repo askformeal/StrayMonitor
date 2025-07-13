@@ -1,3 +1,7 @@
 colorama==0.4.6
 loguru==0.7.3
+pillow==11.3.0
+psutil==7.0.0
+pystray==0.19.5
+six==1.17.0
 win32-setctime==1.2.0
