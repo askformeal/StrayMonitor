@@ -40,4 +40,4 @@ pip install -r requirements.txt
 - `loguru`：日志记录
 
 ## 许可证
-本项目遵循MIT许可证，详细信息请参见LICENSE文件。
+本项目遵循GPLv3许可证，详细信息请参见LICENSE文件。
