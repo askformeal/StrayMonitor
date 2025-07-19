@@ -8,6 +8,7 @@ pyproject.toml
 uv.lock
 *.tmp.*
 build.py
+build.ps1
 *.spec
 StrayMonitor_v*.zip
 /pystand
