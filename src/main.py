@@ -2,16 +2,18 @@ from threading import Thread
 from time import sleep
 import platform as pf
 from datetime import datetime
+from tkinter import TclError
 from tkinter import messagebox
 
 from sys import argv
-from src import __version__
+from src import __version__, is_release
 from src.settings import Settings
+from src.option import Option
 from src.window import Window
+from src.gen_img import GenImg
 
 from loguru import logger
 from pystray import MenuItem, Menu, Icon
-from PIL import Image, ImageDraw
 import psutil
 
 class Main:
@@ -19,6 +21,11 @@ class Main:
         self.settings = Settings()
         self.code = 0
         self.running = True
+        if is_release:
+            self.env = 'Release'
+        else:
+            self.env = 'Develop'
+        self.interval = self.settings.INITIAL_INTERVAL
 
         logger.add(self.settings.PATHS['log'],
                    level=self.settings.LOG_LEVEL,
@@ -26,8 +33,13 @@ class Main:
                    rotation=self.settings.LOG_MAX_BYTES,
                    colorize=False,
                    )
-        
+    
+        self.options = Option(self)
         self.window = Window(self)
+
+
+        self.generator = GenImg(self)
+        print(self is self.generator.root)
         
         if len(argv) > 1:
             monitor = argv[1].lower()
@@ -45,7 +57,7 @@ class Main:
                     Menu.SEPARATOR,
                     MenuItem('Exit', lambda: self.exit(note='via Memory stray',
                                                        confirm=True)))
-            self.mem_icon = Icon('0%', self.gen_img(0), menu=menu)
+            self.mem_icon = Icon('0%', self.generator.gen_img(0), menu=menu)
             Thread(target=self.mem_icon.run, daemon=True).start()
 
         if monitor in ('cpu', 'both'):
@@ -54,13 +66,13 @@ class Main:
                     Menu.SEPARATOR,
                     MenuItem('Exit', lambda: self.exit(note='via CPU stray',
                                                        confirm=True)))
-            self.cpu_icon = Icon('0%', self.gen_img(0), menu=menu)
+            self.cpu_icon = Icon('0%', self.generator.gen_img(0), menu=menu)    
             Thread(target=self.cpu_icon.run, daemon=True).start()
-        
 
         self.cpu_plot = []
         self.mem_plot = []
-        
+        self.pre_stamp = datetime.now().timestamp()
+
         logger.debug(f'Main module ({__name__}) initialized')
 
     def show_info(self):
@@ -129,121 +141,53 @@ class Main:
 
         self.window.show_info(info)
 
-    def gen_plot_img(self, cpu: list[int], mem: list[int]) -> tuple:
-        def gen_img(l: list, line_color, fill_color):
-            plot_len = self.settings.PLOT_LEN
-            x_rate = self.settings.PLOT_SIZE_RATE[0]
-            y_rate = self.settings.PLOT_SIZE_RATE[1]
-
-            width = int(plot_len * x_rate)
-            height = int(100 * y_rate)
-
-            image = Image.new('RGB', (width, height), color=self.settings.PLOT_BG)
-            draw = ImageDraw.Draw(image)
-            
-            spacing = width // self.settings.X_GRID_NUM-1
-            if self.settings.X_GRID:
-                for i in range(1, self.settings.X_GRID_NUM+1):
-                    x = i * spacing
-                    draw.line([(x, 0), (x, height)], 
-                              fill=self.settings.GRIDE_COLOR,
-                              width=self.settings.GRIDE_WIDTH)
-
-            spacing = height // self.settings.Y_GRID_NUM-1
-            if self.settings.Y_GRID:
-                for i in range(1, self.settings.Y_GRID_NUM+1):
-                    y = i * spacing
-                    draw.line([(0, y), (width, y)],
-                              fill=self.settings.GRIDE_COLOR,
-                              width=self.settings.GRIDE_WIDTH)
-            
-            draw.rectangle([(0,0), (width-1, height-1)], width=1, 
-                           outline=self.settings.GRIDE_COLOR)
-
-            # image = image.transpose(Image.FLIP_TOP_BOTTOM)
-            
-            for i in range(plot_len-1):
-                draw.line([(i*x_rate, l[i]*y_rate), ((i+1)*x_rate, l[i+1]*y_rate)],
-                        fill=line_color,
-                        width=self.settings.PLOT_LINE_WIDTH)
-                points = [(i*x_rate, l[i]*y_rate), ((i+1)*x_rate, l[i+1]*y_rate),
-                        ((i+1)*x_rate, 0), (i*x_rate, 0)]
-                draw.polygon(points, fill=fill_color)
-            
-            image = image.transpose(Image.FLIP_TOP_BOTTOM)
-            return image
-
-        plot_len = self.settings.PLOT_LEN
-        cpu = (([0] * plot_len) + cpu)[-plot_len:]
-        mem = (([0] * plot_len) + mem)[-plot_len:]
-        # [0,0,0,0,0,0,0,0,0,0] + [1,2,3] -> [0,0,0,0,0,0,0,1,2,3]
-
-        cpu_image = gen_img(cpu, self.settings.CPU_LINE_COLOR,
-                            self.settings.CPU_FILL_COLOR)
-        mem_image = gen_img(mem, self.settings.MEM_LINE_COLOR,
-                            self.settings.MEM_FILL_COLOR)
-        
-        return (cpu_image, mem_image)
-
-    def gen_img(self, rate: float) -> Image:
-        size = self.settings.STRAY_SIZE
-        image = Image.new('RGB', (size, size), color=self.settings.ICON_BG)
-        draw = ImageDraw.Draw(image)
-        height = (size-1) - ((size-1) * rate)
-        rect_pos = [(0, height), (size-1, size-1)]
-
-        if rate < self.settings.MIDDLE_THRESHOLD:
-            color = self.settings.LOW_COLOR
-        elif rate >= self.settings.MIDDLE_THRESHOLD and rate < self.settings.HIGH_THRESHOLD:
-            color = self.settings.MIDDLE_COLOR
-        else:
-            color = self.settings.HIGH_COLOR
-
-        draw.rectangle(rect_pos, fill=color)
-
-        tmp = height + self.settings.LINE_WIDTH
-        if tmp > size-1:
-            tmp = size-1
-        rect_pos = [(0, height), (size-1, tmp)]
-        draw.rectangle(rect_pos, fill=self.settings.LINE_COLOR)
-        return image
-
     def update(self):
         while self.running:
             try:
+                if self.env == 'Develop':
+                    tmp = ' (Develop)'
+                else:
+                    tmp = ''
+
                 cpu_usage = psutil.cpu_percent()
-                self.cpu_icon.icon = self.gen_img(cpu_usage/100)
-                self.cpu_icon.title = f'CPU: {cpu_usage}%'
+                self.cpu_icon.icon = self.generator.gen_img(cpu_usage/100)
+                self.cpu_icon.title = f'CPU: {cpu_usage}%{tmp}'
 
                 self.cpu_plot.append(cpu_usage)
-                if len(self.cpu_plot) > self.settings.PLOT_LEN:
+                if len(self.cpu_plot) > self.options.plot_len:
                     self.cpu_plot = self.cpu_plot[1:]
 
                 mem = psutil.virtual_memory()
-                mem.percent
-                self.mem_icon.icon = self.gen_img(mem.percent/100)
+                self.mem_icon.icon = self.generator.gen_img(mem.percent/100)
                 self.mem_icon.title = f'Memory: {mem.percent}% '\
                                     f'({mem.used / (1024 ** 3):.3f}/'\
-                                    f'{mem.total / (1024 ** 3):.3f} GB)'
-                
+                                    f'{mem.total / (1024 ** 3):.3f} GB){tmp}'
                 self.mem_plot.append(mem.percent)
-                if len(self.mem_plot) > self.settings.PLOT_LEN:
+                if len(self.mem_plot) > self.options.plot_len:
                     self.mem_plot = self.mem_plot[1:]
-
                 try:
-                    self.window.update_plot(self.gen_plot_img(self.cpu_plot, self.mem_plot),
+                    self.window.update_plot(self.generator.gen_plot_img(self.cpu_plot, self.mem_plot),
                                             self.cpu_plot[-1], self.mem_plot[-1])
+                
                 except RuntimeError:
                     ...
-                sleep(self.settings.INTERVAL)
+                sleep(self.interval)
+                now_stamp = datetime.now().timestamp()
+                actual_interval = round(now_stamp - self.pre_stamp, 3)
+                self.pre_stamp = now_stamp
+                self.window.actual_interval.config(text='Interval: '\
+                                                        f'{str(actual_interval):.4}')
+
             except KeyboardInterrupt:
                 self.exit(note='via keyboard interrupt')
+            except TclError as e:
+                logger.error(f'TclError: {e}')
 
     def start(self) -> int:
         logger.info(f'Start Stray Monitor {__version__}')
         Thread(target=self.update, daemon=True).start()
         try:
-            self.window.mainloop()
+            self.window.mainloop()  
         except KeyboardInterrupt:
             self.exit(note='via keyboard interrupt')
         return self.code
